@@ -1938,8 +1938,8 @@ class Hull_Parameterization:
                 HULL.vectors[startTriangles + 2*i] =     np.array([pts_Lids[i+1], pts_Lidp[i],  pts_Lidp[i+1]])
             
             
-        HULL.save(namepath + '.stl')
-        return HULL
+        # HULL.save(namepath + '.stl')
+        return HULL.vectors
     
  
     
