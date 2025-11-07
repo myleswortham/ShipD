@@ -3,31 +3,20 @@ from HullParameterization import Hull_Parameterization as HP
 
 Vectors = np.load('./scripts/ShipD/InputVectors_30k.npy')
 
-def globalOptions(vector_index: int = 0, scale_factor: float = 20.0, NUM_WL: int = 100, PointsPerWL: int = 800,
-                  bit_AddTransom: bool = True, bit_AddDeckLid: bool = True, vector: bool = False):
+def globalOptions(shipdIndex: int = 0, dwgSclFct: float = 20.0, shipdWLNum: int = 100, shipdWLPts: int = 800,
+                  shipdXsom: bool = True, shipdDeck: bool = True, shipdVector: bool = False, **kwargs):
     global OPTIONS
     OPTIONS = {
-        "vector_index": vector_index,
-        "scale_factor": scale_factor,
-        "NUM_WL": NUM_WL,
-        "PointsPerWL": PointsPerWL,
-        "bit_AddTransom": bit_AddTransom,
-        "bit_AddDeckLid": bit_AddDeckLid,
-        "vector": vector
+        "vector_index":   shipdIndex,
+        "scale_factor":   dwgSclFct,
+        "NUM_WL":         shipdWLNum,
+        "PointsPerWL":    shipdWLPts,
+        "bit_AddTransom": shipdXsom,
+        "bit_AddDeckLid": shipdDeck,
+        "vector":         shipdVector
     }
 
-def main(vector_index: int = 0, scale_factor: float = 20.0, NUM_WL: int = 100, PointsPerWL: int = 800,
-         bit_AddTransom: bool = True, bit_AddDeckLid: bool = True, vector: bool = None):
-    
-
-    Hull = HP(vector)
-    # constraints = Hull.input_Constraints()
-    strpath =  './Sample_Hull_Mesh'
-    hullvectors = Hull.gen_stl(NUM_WL=NUM_WL, PointsPerWL=PointsPerWL, bit_AddTransom=bit_AddTransom, bit_AddDeckLid=bit_AddDeckLid, namepath=strpath)
-    hullvectors *= scale_factor  # Scale the numpy-stl mesh
-    return hullvectors
-
-def main_test(Lb: float = 0.48, Ls: float = 0.45, Bd: float = 0.21, Dd: float = 0.15, Bs: float = 0.5, WL: float = 0.5,
+def main(Lb: float = 0.48, Ls: float = 0.45, Bd: float = 0.21, Dd: float = 0.15, Bs: float = 0.5, WL: float = 0.5,
               Bc: float = 0.28, Beta: float = 22.5, Rc: float = 0.5, Rk: float = 0.0, BOWA: float = 0.0,
               BOWB: float = 0.0, BK: float = 0.5, Kappa_BOW: float = 0.5, DELTA_BOWA: float = 0.0,
               DELTA_BOWB: float = 0.0, DRIFTA: float = 0.0, DRIFTB: float = 0.0, DRIFTC: float = 30.0,
@@ -36,16 +25,17 @@ def main_test(Lb: float = 0.48, Ls: float = 0.45, Bd: float = 0.21, Dd: float = 
               Bc_trans: float = 0.25, Rc_trans: float = 0.25, Rk_trans: float = 0.0, bit_BB: bool = True,
               bit_SB: bool = True, Lbb: float = 0.1, Hbb: float = 0.5, Bbb: float = 0.5, Lbbm: float = 0.0,
               Rbh: float = 0.19, Kappa_SB: float = 0.5, Lsb: float = 0.1, HsbOA: float = 0.5, Hsb: float = 0.5,
-              Bsb: float = 0.5, Lsbm: float = 0.0, Rsb: float = 0.19):
+              Bsb: float = 0.5, Lsbm: float = 0.0, Rsb: float = 0.19, **kwargs):
     if OPTIONS["vector"]:
+        vector = Vectors[OPTIONS["vector_index"]]
+    else:
         vector = np.array([
             10, Lb, Ls, Bd, Dd, Bs, WL, Bc, Beta, Rc, Rk, BOWA, BOWB, BK, Kappa_BOW, DELTA_BOWA, DELTA_BOWB,
             DRIFTA, DRIFTB, DRIFTC, int(bit_EP_S), int(bit_EP_T), TRANSA, SK, Kappa_STERN, DELTA_STERNA,
             DELTA_STERNB, Beta_trans, Bc_trans, Rc_trans, Rk_trans, int(bit_BB), int(bit_SB), Lbb, Hbb,
             Bbb, Lbbm, Rbh, Kappa_SB, Lsb, HsbOA, Hsb, Bsb, Lsbm, Rsb
         ])
-    else:
-        vector = Vectors[OPTIONS["vector_index"]]
+        
 
     Hull = HP(vector)
     strpath = './Sample_Hull_Mesh'
