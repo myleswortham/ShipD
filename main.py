@@ -3,12 +3,12 @@ from HullParameterization import Hull_Parameterization as HP
 
 Vectors = np.load('./scripts/ShipD/InputVectors_30k.npy')
 
-def globalOptions(shipdIndex: int = 0, dwgSclFct: float = 20.0, shipdWLNum: int = 100, shipdWLPts: int = 800,
+def globalOptions(shipdIndex: int = 0, shipdDwgSclFct: float = 20.0, shipdWLNum: int = 100, shipdWLPts: int = 800,
                   shipdXsom: bool = True, shipdDeck: bool = True, shipdVector: bool = False, **kwargs):
     global OPTIONS
     OPTIONS = {
         "vector_index":   shipdIndex,
-        "scale_factor":   dwgSclFct,
+        "scale_factor":   shipdDwgSclFct,
         "NUM_WL":         shipdWLNum,
         "PointsPerWL":    shipdWLPts,
         "bit_AddTransom": shipdXsom,
@@ -35,7 +35,7 @@ def main(Lb: float = 0.48, Ls: float = 0.45, Bd: float = 0.21, Dd: float = 0.15,
             DELTA_STERNB, Beta_trans, Bc_trans, Rc_trans, Rk_trans, int(bit_BB), int(bit_SB), Lbb, Hbb,
             Bbb, Lbbm, Rbh, Kappa_SB, Lsb, HsbOA, Hsb, Bsb, Lsbm, Rsb
         ])
-        
+
 
     Hull = HP(vector)
     strpath = './Sample_Hull_Mesh'
