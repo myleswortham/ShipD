@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shipd"
+version = "0.1.0"
+requires-python = "==3.12.*"
+dependencies = [
+    "matplotlib",
+    "numpy<2",
+    "numpy-stl",
+    "pydantic>=2",
+    "pymoo",
+    "tqdm",
+]
+
+[project.entry-points."spatial.root.mesh"]
+hull = "spatial_ops:hull"
+
+[tool.setuptools]
+py-modules = ["Gaussian_Curvature", "HullParameterization", "MaxBox", "ModifiedMichellCw", "STLGen", "spatial_ops"]

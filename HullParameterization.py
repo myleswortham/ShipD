@@ -1759,7 +1759,7 @@ class Hull_Parameterization:
         return np.array(WL)
         
     
-    def gen_stl(self, NUM_WL = 50, PointsPerWL = 300, bit_AddTransom = 1, bit_AddDeckLid = 0, bit_RefineBowAndStern = 0, namepath = 'Hull_Mesh'):
+    def gen_stl(self, NUM_WL = 50, PointsPerWL = 300, bit_AddTransom = 1, bit_AddDeckLid = 0, bit_RefineBowAndStern = 0):
         # This function generates a surface of the mesh by iterating through the points on the waterlines
         
         #compute number of triangles in the mesh
@@ -1884,13 +1884,13 @@ class Hull_Parameterization:
             numTriangles += 2*len(pts[-1]) - 3
     
 
-        HULL = mesh.Mesh(np.zeros(numTriangles, dtype=mesh.Mesh.dtype))
+        triangles = np.zeros((numTriangles, 3, 3))
     
-        HULL.vectors[0:len(TriVec)] = np.copy(TriVec)
+        triangles[0:len(TriVec)] = np.copy(TriVec)
         
         TriVec_stbd = np.copy(TriVec[:,::-1])
         TriVec_stbd[:,:,1] *= -1
-        HULL.vectors[len(TriVec):hullTriangles] = np.copy(TriVec_stbd)
+        triangles[len(TriVec):hullTriangles] = np.copy(TriVec_stbd)
     
         # NowBuild the transom:
         if bit_AddTransom:
@@ -1910,11 +1910,11 @@ class Hull_Parameterization:
             
             
             
-            HULL.vectors[hullTriangles] = np.array([pts_trans[0], pts_trans[1], pts_tranp[1]])
+            triangles[hullTriangles] = np.array([pts_trans[0], pts_trans[1], pts_tranp[1]])
                         
             for i in range(1,wl_above):
-                HULL.vectors[hullTriangles + 2*i-1] = np.array([pts_trans[i], pts_trans[i+1], pts_tranp[i]])
-                HULL.vectors[hullTriangles + 2*i] =     np.array([pts_tranp[i], pts_trans[i+1], pts_tranp[i+1]])
+                triangles[hullTriangles + 2*i-1] = np.array([pts_trans[i], pts_trans[i+1], pts_tranp[i]])
+                triangles[hullTriangles + 2*i] =     np.array([pts_tranp[i], pts_trans[i+1], pts_tranp[i+1]])
                 
         
         # Add the deck lid
@@ -1931,13 +1931,19 @@ class Hull_Parameterization:
             startTriangles = hullTriangles + transomTriangles
             
             # Points are orered so the right hand rule points the lid in positive z
-            HULL.vectors[startTriangles] = np.array([pts_Lids[0], pts_Lidp[1], pts_Lids[1]])
+            triangles[startTriangles] = np.array([pts_Lids[0], pts_Lidp[1], pts_Lids[1]])
             
             for i in range(1,len(pts_Lids)-1):              
-                HULL.vectors[startTriangles + 2*i - 1] = np.array([pts_Lids[i], pts_Lidp[i], pts_Lids[i+1]])
-                HULL.vectors[startTriangles + 2*i] =     np.array([pts_Lids[i+1], pts_Lidp[i],  pts_Lidp[i+1]])
+                triangles[startTriangles + 2*i - 1] = np.array([pts_Lids[i], pts_Lidp[i], pts_Lids[i+1]])
+                triangles[startTriangles + 2*i] =     np.array([pts_Lids[i+1], pts_Lidp[i],  pts_Lidp[i+1]])
             
             
+        return triangles
+
+    def save_stl(self, triangles, namepath = 'Hull_Mesh'):
+        # Writes the triangles from gen_stl (numTriangles x 3 x 3) to namepath.stl
+        HULL = mesh.Mesh(np.zeros(len(triangles), dtype=mesh.Mesh.dtype))
+        HULL.vectors[:] = triangles
         HULL.save(namepath + '.stl')
         return HULL
     
