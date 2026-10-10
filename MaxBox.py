@@ -97,10 +97,12 @@ def PC_BoxCon(points, box_inputs,Dd):
 class BoxOpt(ElementwiseProblem):
     
     # When intializing, set the mechanism size and target curve
-    def __init__(self, x):
+    def __init__(self, x, *, input_format=None, columns=None, source=None):
         
         #set up hull, bounds, and initial guess for the problem
-        self.hull = HP(x)
+        self.hull = (HP(x) if input_format is None and columns is None and source is None else
+                     HP.from_declared(x, input_format=HP.CURRENT_FORMAT if input_format is None else input_format,
+                                      columns=columns, source=source))
         
         self.PC = self.hull.gen_MeshGridPointCloud(NUM_WL = 201, PointsPerLOA = 501, Z = [], X = [], bit_GridOrList = 0)
     
@@ -130,11 +132,11 @@ class BoxOpt(ElementwiseProblem):
 
 #set up optimization code a call function:
 
-def Run_BoxOpt(x):
+def Run_BoxOpt(x, *, input_format=None, columns=None, source=None):
     
     #returns [Fwd start of box, length of box, height, width, volume, final point cloud check if points exist outside the box (0 if good, 1 if fail)]
     #The first five terms are normalized by LOA(for lengths) or LOA^3(for volume)
-    problem = BoxOpt(x)
+    problem = BoxOpt(x, input_format=input_format, columns=columns, source=source)
 
     algorithm = NelderMead()
 
@@ -149,7 +151,7 @@ def Run_BoxOpt(x):
     
     A[4] = -res.F/(x[0]**3.0)
     
-    hull = HP(x)
+    hull = problem.hull
     
     #PC = hull.gen_MeshGridPointCloud(NUM_WL = 201, PointsPerLOA = 501, Z = [], X = [], bit_GridOrList = 0)
     

@@ -1,0 +1,6 @@
+matplotlib
+numpy<2
+numpy-stl
+pydantic>=2
+pymoo
+tqdm

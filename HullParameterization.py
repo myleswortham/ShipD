@@ -14,7 +14,7 @@ This Code is a continuation of Noah Bagazinski's work in ship hull genneration u
 parametric design scheme.  
 
 =============================================================================================
-The hull parameterization is defined in five chunks:
+The current hull parameterization is defined in four chunks:
     
 1) General Hull Form. 
     
@@ -36,14 +36,6 @@ The hull parameterization is defined in five chunks:
    This includes functions that define the stern profile, the convergence angle (slope of the ship at the transom), the transom cross section, the profile
    of the rocker at the stern of the ship, the profile where the full beadth of the ship is achieved, and the curvature of the hull along the stern.
     
-5) Bulb Forms
-    
-    Bulb forms slightly modified from the parameterization defined by:
-        Chrismianto, D. and Kim, D.J., 2014. 'Parametric bulbous bow design using the cubic 
-        Bezier curve and curve-plane intersection method for the minimization of ship resistance 
-        in CFD'. Journal of Marine Science and Technology, 19(4), pp.479-492.
-        
- functions include generation of NURBS curves to generate the meshes of the bulbous bow and stern 
     
 """
 
@@ -58,16 +50,85 @@ from stl import mesh
 
 
 class Hull_Parameterization:
-  
+
+    CURRENT_FORMAT = "shipd-current31-v1"
+    INPUT_COLUMNS = (
+        "LOA", "Lb", "Ls", "Bd", "Dd", "Bs", "WL", "Bc", "Beta", "Rc", "Rk",
+        "Abow", "Bbow", "BK_z", "Kappa_bow", "Adel_bow", "Bdel_bow", "Adrft",
+        "Bdrft", "Cdrft", "bit_EP_S", "bit_EP_T", "Atrans", "SK_z", "Kappa_stern",
+        "Adel_stern", "Bdel_stern", "Beta_trans", "Bc_trans", "Rc_trans", "Rk_trans",
+    )
+    HISTORICAL_FORMAT = "shipd-historical45-v1"
+    # Recorded historical DATA order, not current construction fields.
+    HISTORICAL_COLUMNS = tuple({
+        "Adel_bow": "Adel bow", "Bdel_bow": "Bdel bow",
+        "Adel_stern": "Adel stern", "Bdel_stern": "Bdel stern",
+        "Beta_trans": "Beta trans", "Bc_trans": "Bc trans",
+        "Rc_trans": "Rc Trans", "Rk_trans": "Rk trans",
+    }.get(name, name) for name in INPUT_COLUMNS) + (
+        "bit_BB", "bit_SB", "Lbb", "Hbb", "Bbb", "Lbbm", "Rbb", "Kappa_SB",
+        "Lsb", "HSBOA", "Hsb", "Bsb", "Lsbm", "Rsb",
+    )
+
+    @classmethod
+    def admit(cls, inputs, *, input_format, columns=None, source=None):
+        """Validate a declared layout without changing the source array.
+
+        Current positional arrays contractually use INPUT_COLUMNS. Shape alone does
+        not establish a caller's actual column identity; named declarations are checked
+        when supplied. Historical inputs require the recorded order and provenance.
+        """
+        if input_format == cls.CURRENT_FORMAT:
+            expected = cls.INPUT_COLUMNS
+        elif input_format == cls.HISTORICAL_FORMAT:
+            expected = cls.HISTORICAL_COLUMNS
+            if columns is None or not isinstance(source, str) or not source.strip():
+                raise ValueError("historical ShipD inputs require declared columns and source provenance")
+        else:
+            raise ValueError(f"unsupported ShipD input format: {input_format!r}")
+        if columns is not None and (not isinstance(columns, (list, tuple)) or tuple(columns) != expected):
+            raise ValueError(f"ShipD columns must match the recorded order for {input_format}")
+        values = np.asarray(inputs)
+        if values.dtype.kind not in "biuf":
+            raise ValueError("ShipD construction requires real numeric input values")
+        if values.ndim not in (1, 2) or values.shape[-1] != len(expected):
+            raise ValueError(f"{input_format} requires {len(expected)} columns, not {values.shape}")
+        if not np.isfinite(values).all():
+            raise ValueError("ShipD construction requires finite input values")
+        if input_format == cls.HISTORICAL_FORMAT:
+            retired = [expected.index(name) for name in ("bit_BB", "bit_SB")]
+            if np.any(values[..., retired] != 0):
+                raise ValueError("historical ShipD inputs enable retired bow/stern features; construction is refused")
+        values = np.asarray(values, dtype=np.float64)
+        if not np.isfinite(values).all():
+            raise ValueError("ShipD inputs must remain finite in the construction's float64 representation")
+        return values[..., :len(cls.INPUT_COLUMNS)].copy()
+
+    @classmethod
+    def from_declared(cls, inputs, *, input_format, columns, source):
+        """Construct one admitted current hull, retaining declared input provenance."""
+        result = cls(cls.admit(inputs, input_format=input_format, columns=columns, source=source))
+        result.input_format, result.input_source = input_format, source
+        return result
+
+    @property
+    def input_columns(self):
+        return self.HISTORICAL_COLUMNS if self.input_format == self.HISTORICAL_FORMAT else self.INPUT_COLUMNS
+
     #Define parameters of targethull
     def __init__(self, inputs):
         '''
-        inputs is a numpy vector that represents the parameterization of a hull.
+        inputs is one current31 numpy vector in INPUT_COLUMNS order.
         the instantiation function generates all of the constants and factors used 
         in defining the parameterization of the hull.
         Most of the inputs are scaled to LOA in some form 
         '''
         
+        inputs = self.admit(inputs, input_format=self.CURRENT_FORMAT)
+        if inputs.ndim != 1:
+            raise ValueError("Hull_Parameterization constructs one current31 row at a time")
+        self.input_format, self.input_source = self.CURRENT_FORMAT, None
+
         self.LOA = inputs[0]
         self.Lb = inputs[1] *self.LOA
         self.Ls = inputs[2] *self.LOA
@@ -108,21 +169,6 @@ class Hull_Parameterization:
         self.Bc_trans = inputs[28]/2.0 *self.LOA # half breadth
         self.Rc_trans = inputs[29]*self.Bc_trans
         self.Rk_trans = inputs[30]*self.Dd*(1-self.SK[1])
-        #self.CONVERGE = np.array(inputs[33:36])
-        self.bit_BB = inputs[31]
-        self.bit_SB = inputs[32]
-        self.Lbb = inputs[33]
-        self.Hbb = inputs[34]
-        self.Bbb = inputs[35]
-        self.Lbbm = inputs[36]
-        self.Rbb = inputs[37]
-        self.Kappa_SB = inputs[38]
-        self.Lsb = inputs[39]
-        self.HSBOA = inputs[40]
-        self.Hsb = inputs[41]
-        self.Bsb = inputs[42]
-        self.Lsbm = inputs[43]
-        self.Rsb = inputs[44]
                        
         #Generate and Check the Forms of the Overall Hull
         
@@ -138,8 +184,6 @@ class Hull_Parameterization:
         self.GenSternForm()
         #C4 = print(self.SternFormConstraints())
         
-        self.GenBulbForms()
-        #C5 = print(self.BulbFormConstraints())
 
         
         
@@ -762,17 +806,11 @@ class Hull_Parameterization:
         return np.sqrt(z/self.STERNRISE) + self.Lb + self.Lm + self.Ls*self.Kappa_STERN
     
     def stern_profile(self, z):
-        # shows the profile of the stern without the bulbous stern:
-            
-        if self.bit_SB and z <= self.WL*self.HSBOA:
-            return self.SB_Prof[0] # If there is a bulbous stern, we want to form the profile to lead into the SB.
-        
+        if z <= self.SK[1]:
+            return self.sternrise(z)
         else:
-            if z <= self.SK[1]:
-                return self.sternrise(z)
-            else:
-                return self.transom(z)
-    
+            return self.transom(z)
+
     def delta_stern(self, z):
         #returns the starting position of the stern taper at a given heigt
         return self.Lb + self.Lm + self.DELTA_STERN[0]* z**2.0 + self.DELTA_STERN[1]*z + self.DELTA_STERN[2]
@@ -991,552 +1029,8 @@ class Hull_Parameterization:
     
     
     '''
-    =======================================================================
-                        Section 5: Bulb Forms
-    =======================================================================
-    The Bulb Forms are defined by the following inputs:
-        0)  bit_BB   -> Bit that defines whether there is a bublous bow (1) or not (0)
-        1)  bit_SB   -> Bit that defines whether there is a bublous stern (1) or not (0)
-        2)  Lbb      -> Length of the bulbous bow (BB) fwd the foward perpendicular as a fraction of LOA
-        3)  Hbb      -> Height of widest part of the BB as a fraction of the WL
-        4)  Bbb      -> max. Width of the BB at the FP as a fraction of Bd
-        5)  Lbbm     -> A midpoint along the length of the BB as a fraction of Lbb -> represents the position of max beam of the BB
-        6)  Rbb      -> radius that fillets the BB to the hull (ratio from 0 to 1) -> solved as a cubic function
-        7)  Kappa_SB -> Position where the Stern Bulb diverges from the hull as a fraction of Ls
-        8)  Lsb      -> Length of the stern bulb (SB) as a fraction of LOA
-        9) HSBOA     -> Overall Height of the SB as a fraction of WL
-        9)  Hsb      -> Height of widest part of the SB as a fraction of HSBOA
-        10) Bsb      -> max. Width of the SB at the Kappa_SB as a fraction of Bd
-        11) Lsbm     -> A midpoint along the length of the SB as a fraction of Lsb -> represents the position of max beam of the BB
-        12) Rsb      -> radius that fillets the SB to the hull (ratio from 0 to 1) -> solved as a cubic function
-
-    
-    
-    These Parameters solve 3 functions each for the Bulbous Bow and Bulbous Stern:
-       0) Outline: Definition of upper and lower ellipse that define the profile of the bulb
-       1) Profile of Max width : a parabola that is tangent to an ellipse at the  longitudinal mid point.
-       2) Cross Section Generator: Solves for Rx and Ry of an upper and lower ellipse that solves for a cross section of the bulb
-       3) 
-    
-    
-    Constraints/ NOTES to ensure realistic sizing/ shape of a bulb: 
-        0) Cross Section of bulbs at Starting position need to be encompassed by Half Beam Mid Body
-        1) Rk >= 0
-        2) 0.0 < (Hbb and Hsb) < 1.0
-        3) 0.0 < (Bbb and Bsb) < 1.0
-        4) 0.0 < (Lbb and Lsb) < TBD  (seems a bit outrageous) (but not infeasible technically)
-        5) -1.0 < (Lbbm and Lsbm) < 1.0
-        6) 0.0 < HSBOA < 1.0
-    
-    
-    
-
-    
-    '''
-    def GenBulbForms(self):
-        '''
-        This function generates Prof for the bulbous bow and bulbous stern.
-        
-        it is composted of the following elements in this order:
-            0a) FP = forward perpendicular: the start point were the BB diverges from the hull. 
-            0b) SBs = start of stern bulb: the starting point where the SB diverges from the hull
-            1)  Rz_U = upper z radius for an ellipse that defines the top half of the bulb
-            2)  Rz_L = lower z radius for an ellipse that defines the bottom half of the bulb
-            3)  Ry -> y radius of an ellipse that defines the max width of the bulb
-            4)  Rx -> x Radius of leading edge of bulb
-            5)  Cx -> X center of aforementioned ellipse
-            6)  Cy -> Y center of aforementioned ellipse
-
-        
-        '''
-
-        self.BB_Prof = np.zeros((7,))
-        self.SB_Prof = np.zeros((7,))
-        
-        if self.bit_BB:
-            
-            FP = self.bow_profile(self.WL)
-                        
-            
-            self.BB_Prof[0] = FP
-            self.BB_Prof[1] = (1.0 - self.Hbb)*self.WL
-            self.BB_Prof[2] = self.Hbb*self.WL
-            self.BB_Prof[3] = self.halfBeam_MidBody(self.BB_Prof[2]) *self.Bbb
-            self.BB_Prof[4] = self.Lbb*self.LOA*(1.0-self.Lbbm)
-            self.BB_Prof[5] = FP - self.LOA*self.Lbb*self.Lbbm
-            self.BB_Prof[6] = 0.0
-        
-        
-        if self.bit_SB:
-            SBs = self.Kappa_SB*self.Ls + self.Lm + self.Lb
-            
-            self.SB_Prof[0] = SBs
-            self.SB_Prof[1] = (1.0 - self.Hsb)*self.WL*self.HSBOA
-            self.SB_Prof[2] = self.Hsb*self.WL*self.HSBOA
-            self.SB_Prof[3] = self.halfBeam_MidBody(self.SB_Prof[2])*self.Bsb
-            self.SB_Prof[4] = self.Lsb*self.LOA*(1.0-self.Lsbm)
-            self.SB_Prof[5] = SBs + self.LOA*self.Lsb*self.Lsbm
-            self.SB_Prof[6] = 0.0
-    
-    
-    def BB_profile(self,z):
-        #assumes z is between WL  and 0.0
-        #returns x position of leading edge of SB
-        if z >= self.BB_Prof[2]:
-            return self.BB_Prof[5] - np.sqrt(np.abs(1.0 - ((z-self.Hbb*self.WL)/self.BB_Prof[1])**2.0))*self.BB_Prof[4]
-        else:
-            return self.BB_Prof[5] - np.sqrt(np.abs(1.0 - ((z-self.Hbb*self.WL)/self.BB_Prof[2])**2.0))*self.BB_Prof[4]
-        
-    def halfBeam_BB(self, z, x):
-        #returns the half breadth of the BB at height z and position x. x is a vector
-        #assumes z is between 0 and WL assumes x greater than BB_profile(z)
-        
-        if z >= self.BB_Prof[2]:
-            Rz = self.BB_Prof[1]
-        else:
-            Rz = self.BB_Prof[2]
-        
-        Ry = np.sqrt(np.abs(1.0 - ((z - self.BB_Prof[2])/Rz)**2.0))*self.BB_Prof[3]
-        
-        Rx = self.BB_Prof[5] - self.BB_profile(z)
-        
-        y = np.zeros((len(x),))
-        
-        for i in range(0,len(x)):
-            
-            if x[i] >= self.BB_Prof[5]:
-                y[i] = Ry
-            else:
-                y[i] = np.sqrt(np.abs(1.0 - ((x[i] - self.BB_Prof[5])/Rx)**2.0))*Ry
-        
-        return y
-        
-        
-        
-    def BB_dydx(self,z,x):
-        #This function computes the slope dy/dx slope of the bulbous bow at height z and position x. This assumes x is within the bulbous bow x-range
-        # x is a vector
-        
-        dydx = np.zeros((len(x),))
-        
-        if z >= self.BB_Prof[2]:
-            Rz = self.BB_Prof[1]
-        else:
-            Rz = self.BB_Prof[2]
-        
-        Ry = np.sqrt(np.abs(1.0 - ((z - self.BB_Prof[2])/Rz)**2.0))*self.BB_Prof[3]
-        Rx = self.BB_Prof[5] - self.BB_profile(z)
-        
-        for i in range(0,len(x)):
-        
-            if x[i] >= self.BB_Prof[5]:
-                dydx[i] = 0.0
-            
-            else:
-            
-                dydx[i] = -Ry*(x[i]-self.BB_Prof[5])/(Rx**2.0) * 1/np.sqrt(np.abs(1.0 - ((x[i] - self.BB_Prof[5])/Rx)**2.0))
-        
-        return dydx
-        
-        
-        
-    def SB_profile(self,z):
-        #assumes z is between WL*HSBOA  and 0.0
-        #returns x position of trailing edge of SB
-        if z >= self.Hsb*self.WL*self.HSBOA:
-           # print(z)
-           # print((1- ((z-self.Hsb*self.WL*self.HSBOA)/self.SB_Prof[1])**2.0))
-            return self.SB_Prof[5] + np.sqrt(np.abs(1.0 - ((z-self.Hsb*self.WL*self.HSBOA)/self.SB_Prof[1])**2.0))*self.SB_Prof[4]
-        else:
-            return self.SB_Prof[5] + np.sqrt(np.abs(1.0 - ((z-self.Hsb*self.WL*self.HSBOA)/self.SB_Prof[2])**2.0))*self.SB_Prof[4]
-        
-    def halfBeam_SB(self, z, x):
-        #returns the half breadth of the BB at height z and position x. x is a vector
-        #assumes z is between 0 and WL*HSBOA assumes x less than SB_profile(z)
-        
-        if z >= self.Hsb*self.WL*self.HSBOA:
-            Rz = self.SB_Prof[1]
-        else:
-            Rz = self.SB_Prof[2]
-        
-        Ry = np.sqrt(np.abs(1.0 - ((z - self.Hsb*self.WL*self.HSBOA)/Rz)**2.0))*self.SB_Prof[3]
-        
-        Rx = self.SB_profile(z) - self.SB_Prof[5]
-        
-        y = np.zeros((len(x),))
-        
-        for i in range(0,len(x)):
-            
-            if x[i] <= self.SB_Prof[5]:
-                y[i] = Ry
-            else:
-                y[i] = np.sqrt(np.abs(1.0 - ((x[i] - self.SB_Prof[5])/Rx)**2.0))*Ry 
-        
-        return y
-    
-    def SB_dydx(self,z,x):
-        #This function computes the slope dy/dx slope of the bulbous bow at height z and position x. This assumes x is within the bulbous bow x-range
-        # x is a vector
-        if z >= self.Hsb*self.WL*self.HSBOA:
-            Rz = self.SB_Prof[1]
-        else:
-            Rz = self.SB_Prof[2]
-        
-        Ry = np.sqrt(np.abs(1.0 - ((z - self.Hsb*self.WL*self.HSBOA)/Rz)**2.0))*self.SB_Prof[3]
-        
-        Rx = self.SB_profile(z) - self.SB_Prof[5]
-        
-        dydx = np.zeros((len(x),))
-        
-        for i in range(0, len(x)):
-        
-            if x[i] <= self.SB_Prof[5]:
-                dydx[i] =  0.0
-            
-            else:
-                dydx[i] = -Ry*(x[i]-self.SB_Prof[5])/(Rx**2.0) * 1/np.sqrt(np.abs(1.0 - ((x[i] - self.SB_Prof[5])/Rx)**2.0)) 
-            
-        return dydx
-        
- 
-        
-        
-    
-    def gen_waterline_bow_BB(self, z, NUM_POINTS = 100, X = [0,1], bit_spaceOrGrid = 1):
-        #this function returns a set of [X,Y] points that accounts for the shape and fillet radius of a bulbous bow on the bow profile
-        
-        a = NUM_POINTS        
-        if z >= self.WL:       
-            #If z is above the Ship's waterline, then the bulbous bow does not exist in that section
-            return self.gen_waterline_bow(z, NUM_POINTS = a, X = X, bit_spaceOrGrid = bit_spaceOrGrid)
-        
-        else:
-            PROF = self.solve_waterline_bow(z)
-            
-            x1 = self.BB_profile(z)
-        
-            x2 = self.delta_bow(z)
-            
-            
-            #Set x based on spacing or grid
-            if bit_spaceOrGrid:
-            
-                x = np.linspace(x1,x2,NUM_POINTS)
-                XY = np.zeros((len(x),2))
-            
-            else:
-                x = [i for i in X if (i > x1 and i <= x2)]
-                
-                x = np.concatenate(([x1],x))
-                
-                XY = np.zeros((len(x),2))
-            
-                
-                
-            #Find most likely point where BB intersects Bow Curve
-            A = PROF.copy()
-            
-            A[3] = A[3] - self.halfBeam_BB(z, [self.BB_Prof[5]])
-            
-            
-            ROOTS = np.roots(A)
-            
-            x_int = np.amin(np.real([i for i in ROOTS if (i >= self.bow_profile(z) and i >= self.BB_profile(z))])) #Need to call np.real as there will be instances where 2nd and 3rd roots of PROF will be imaginary. calling np.real to clean this up 
-            
-            
-            '''
-            #ind start and ending points for Rbb -> not quite a circular radius, but it is a cubic fillet (sorta counts)
-             Xrad are the points forward and aft where fillet will start. 
-            Xrad[0] is Rbb fraction of distance between interesect and fwd profie of BB at z 
-            Xrad[1] is Rbb fraction of the distance bewtween the insect and delta_bow(z)
-            '''
-            dx = abs(np.amin([x_int - self.BB_profile(z), self.delta_bow(z) - x_int])) #Distance over which fillet occurs # Need to add abs to avoid dumb errors
-            
-            
-            
-            Xrad = [(x_int - dx*self.Rbb/2.0), (x_int + dx*self.Rbb/2.0)]
-            
-            
-            # going to build quartic systems of Eqn to solve. only tricky thing: what is dydx at Xrad[0]
-            
-            Yrad = [self.halfBeam_BB(z, [Xrad[0]])[0], self.halfBeam_Bow([Xrad[1]], PROF)[0]]    
-            dydx = [self.BB_dydx(z, [Xrad[0]])[0], self.bow_dydx([Xrad[1]], PROF)[0]]
-            
-            
-            '''
-            Rbb is quartic systems of eqns
-            5 boundary conditions:
-                both (Xrad, Yrad) on fillet curve
-                both dydx are matched at ends
-                dydx halfway between BCs is mean of BC dydx and avg slope of BC end points
-            
-            '''
-            
-            #dydx_mean = (2.0*((Yrad[1] - Yrad[0])/(Xrad[1]-Xrad[0])) + dydx[0] + dydx[1])/4.0
-            
-            Arad = np.array([[Xrad[0]**4.0,     Xrad[0]**3.0,   Xrad[0]**2.0,       Xrad[0],    1.0],
-                             [Xrad[1]**4.0,     Xrad[1]**3.0,   Xrad[1]**2.0,       Xrad[1],    1.0],
-                             [4.0*Xrad[0]**3.0, 3.0*Xrad[0]**2.0, 2.0*Xrad[0],      1.0,        0.0],
-                             [4.0*Xrad[1]**3.0, 3.0*Xrad[1]**2.0, 2.0*Xrad[1],      1.0,        0.0],
-                             [12.0*Xrad[0]**2.0, 6.0*Xrad[0]**2.0, 2.0,             0.0,        0.0]])
- 
-            
-              
-            brad = np.array([Yrad[0], Yrad[1], dydx[0], dydx[1], 0.0]) #dydx_mean])
-            
-            
-            PROFrad = np.linalg.solve(Arad,brad)
-                
-            XY[0,:] = [x1, 0.0]
-            
-            xbb = [i for i in x if (i > x1 and i <= Xrad[0])]
-            
-            xbbrad = [i for i in x if (i > Xrad[0] and i < Xrad[1])]
-            
-            xbow = [i for i in x if (i >= Xrad[1] and i <= x2)]
-            
-            ybb = self.halfBeam_BB(z, xbb)
-            
-            ybbrad = np.zeros((len(xbbrad),))
-            
-            for i in range(0,len(xbbrad)):
-                ybbrad[i] = PROFrad[0]*xbbrad[i]**4.0 + PROFrad[1]*xbbrad[i]**3.0 + PROFrad[2]*xbbrad[i]**2.0 + PROFrad[3]*xbbrad[i] + PROFrad[4]
-            
-            ybow = self.halfBeam_Bow(xbow, PROF)
-            
-        
-            
-            XY[1:,0] = x[1:]
-            
-            XY[1:,1] = np.concatenate((ybb,ybbrad,ybow)) 
-                
-                
-            return XY
-
-
-    def gen_waterline_stern_SB(self, z, NUM_POINTS = 100, X = [0,1], bit_spaceOrGrid = 1):
-        #this function returns a set of [X,Y] points that accounts for the shape and fillet radius of a bulbous bow on the bow profile
-        
-        a = NUM_POINTS        
-        if z >= self.WL*self.HSBOA:        #If z is above the Ship's waterline, then the bulbous bow does not exist in that section
-            return self.gen_waterline_stern(z, NUM_POINTS = a, X=X, bit_spaceOrGrid=bit_spaceOrGrid)
-        
-        else:
-            #Set up half beam for stern at z
-            PROF = self.solve_waterline_stern(z)
-            
-            x1 = self.delta_stern(z)
-            
-            x2 = self.SB_profile(z)
-            
-            #Create x distribution       
-            if bit_spaceOrGrid:           
-                x = np.linspace(x1,x2,NUM_POINTS)
-                XY = np.zeros((len(x),2))
-            else:
-                x = [i for i in X if (i >= x1 and i < x2)]
-                x = np.concatenate((x,[x2]))
-                XY = np.zeros((len(x),2))
-            
-            
-            # This y intersect is most likely place that y in 
-            y_int = self.halfBeam_SB(z, [self.SB_Prof[5]])[0] #ad the [0] so that y_int is interpretted as a float
-            
-            if y_int >= self.halfBeam_Stern([self.delta_stern(z)], PROF):
-                y_int = self.halfBeam_Stern([self.delta_stern(z)], PROF)
-                x_int = self.SB_Prof[0]
-            
-            else:
-                if PROF[0]:
-                    x_int = PROF[4]*np.sqrt(abs(1 - ((y_int-PROF[7])/PROF[5])**2.0)) + PROF[6]
-                else:
-                    ROOTS = np.roots([PROF[1], PROF[2], PROF[3]-y_int])
-
-                    x_int = np.amax(np.real([i for i in ROOTS if (i >= self.delta_stern(z))]))
-                
-            
-            #print(x_int)
-            
-            dx = abs(min([x_int - self.delta_stern(z), self.SB_profile(z) - x_int])) #Distance over which fillet occurs
-            
-            Xrad = [(x_int - dx*self.Rsb/2.0), ((x_int + dx*self.Rsb/2.0))]
-            
-           
-            # Parabolic Radius
-            
-            Yrad = [self.halfBeam_Stern([Xrad[0]], PROF)[0], self.halfBeam_SB(z, [Xrad[1]])[0]]  
-            
-            dydx = [self.stern_dydx([Xrad[0]], PROF)[0], self.SB_dydx(z, [Xrad[1]])[0]]
-            
-
-            
-            Arad = np.array([[Xrad[0]**4.0,     Xrad[0]**3.0,   Xrad[0]**2.0,   Xrad[0],    1.0],
-                             [Xrad[1]**4.0,     Xrad[1]**3.0,   Xrad[1]**2.0,   Xrad[1],    1.0],
-                             [4.0*Xrad[0]**3.0, 3.0*Xrad[0]**2.0, 2.0*Xrad[0],    1.0,        0.0],
-                             [4.0*Xrad[1]**3.0, 3.0*Xrad[1]**2.0, 2.0*Xrad[1],    1.0,        0.0],
-                             [12.0*Xrad[1]**2.0, 6.0*Xrad[1]**2.0, 2.0,             0.0,        0.0]])
- 
-            
-              
-            brad = np.array([Yrad[0], Yrad[1], dydx[0], dydx[1], 0.0])
-            
-            
-            PROFrad = np.linalg.solve(Arad,brad)
-            
-            
-            xstern = [i for i in x[:-1] if (i >= x1 and i <= Xrad[0])]
-            
-            xsbrad = [i for i in x[:-1] if (i > Xrad[0] and i < Xrad[1])]
-            
-                        
-            xsb = [i for i in x[:-1] if (i >= Xrad[1] and i < x2)]
-            
-            ystern = self.halfBeam_Stern(xstern, PROF)
-            
-            
-            ysbrad = np.zeros((len(xsbrad),))
-            
-            for i in range(0,len(xsbrad)):
-                
-                ysbrad[i] = PROFrad[0]*xsbrad[i]**4.0 + PROFrad[1]*xsbrad[i]**3.0 + PROFrad[2]*xsbrad[i]**2.0 + PROFrad[3]*xsbrad[i] + PROFrad[4]
-            
-            ysb = self.halfBeam_SB(z, xsb)
-            
-            XY[0:-1,0] = x[0:-1]
-            
-            XY[0:-1,1] = np.concatenate((ystern,ysbrad,ysb))
-            
-            # Make sure XY[-1] is zero to create a closed mesh
-            XY[-1] = [x2,0.0]
-            
-            return XY
-        
-    def plot_BulbProfiles(self):
-        
-        # Plot intersection points in blue
-        # Plot chine pt in green
-        # Plot Center of Rc and Rk in red
-        # half Beam(z) in black
-        
-        z1 = np.linspace(0.0, self.WL, num = 200)
-        z2 = np.linspace(0.0, self.WL*self.HSBOA, num = 200)
-        x = np.zeros((200,2))
-        for i in range(0,len(z1)):
-            x[i,0] = self.BB_profile(z1[i])
-            x[i,1] = self.SB_profile(z2[i]) - self.Ls-self.Lm
-        
-        
-        fig2,ax2 = plt.subplots()
-        ax2.axis('equal')
-        #plt.axis([0,10,0,10])
-        
-        ax2.plot(x[:,0], z1, '-', color = 'blue')
-        ax2.plot(x[:,1], z2,'-' ,color = 'red')  
-
-    
-
-                
-    def BulbformConstraints(self):
-        
-        C = np.zeros((13,))
-        
-        '''
-        Bulb form constraints: 
-            0) BBlower z radius is less than Rk
-            1) BB x radius is less than Rk
-            2) BB half beam is less than the half beam of the midbody at the height of max BB beam
-            3) BB is FWD of Delta Bow at 0
-            4) BB is FWD of Delta Bow at Vertex of Delta Bow
-            5) BB is FWD of Delta Bow at WL
-            6) SB lower z radius is less than Rk
-            7) SB x radius is less than Rk
-            8) SB half beam is less than the half beam of the midbody at the height of max BB beam
-            9) SB Height overall is less than the height of the bottom of the transom
-            10) delta_stern(z = 0) is fwd of the starting position of the max width of the bulb (SB_Prof[5])
-            11) delta_stern(z = WL*HSBOA) is fwd of the starting position of the max width of the bulb (SB_Prof[5])
-            12) if the vertex of delta_stern is less than WL*HSBOA, then it is also fwd of the starting position of the max width of the bulb (SB_Prof[5])
-        '''
-        
-        if self.bit_BB:
-            if self.Beta == 0.0:
-                C[0:3] = np.array([-1.0,
-                                   -1.0,
-                                   self.BB_Prof[3] - self.halfBeam_MidBody(self.BB_Prof[2])])
-                    
-            elif self.Rk > 0.0:
-                C[0:3] = np.array([self.BB_Prof[2] - self.Rk,
-                                   self.BB_Prof[3] -self.Rk,
-                                   self.BB_Prof[3] - self.halfBeam_MidBody(self.BB_Prof[2])])
-            
-            else:
-                C[0:3] = np.array([1.0,1.0,1.0])
-        
-            if self.DELTA_BOW[0] == 0.0:
-                Zv = -1.0
-            else: 
-                Zv = -self.DELTA_BOW[1]/ (2.0*self.DELTA_BOW[0])
-        
-            if Zv >=0.0 and Zv <= self.WL:
-                vert_delta_bow = (self.delta_bow(Zv) - self.BB_Prof[5])
-            else:
-                vert_delta_bow = -1.0
-            
-            C[3:6] = np.array([self.BB_Prof[5] - self.delta_bow(0.0),
-                               self.BB_Prof[5] - self.delta_bow(self.WL), 
-                                vert_delta_bow])
-            
-        else:
-            C[0:6] = np.array([-1.0,-1.0,-1.0, -1.0, -1.0, -1.0])
-            
-
-        
-        if self.bit_SB:
-            if self.Beta == 0.0:
-                C[6:10] = np.array([-1.0,
-                                   -1.0,
-                                   self.SB_Prof[3] - self.halfBeam_MidBody(self.SB_Prof[2]),
-                                   self.WL*self.HSBOA - self.SK[1]])
-                    
-            elif self.Rk > 0.0:
-                C[6:10] = np.array([self.SB_Prof[2] - self.Rk,
-                                   self.SB_Prof[3] -self.Rk,
-                                   self.SB_Prof[3] - self.halfBeam_MidBody(self.SB_Prof[2]),
-                                   self.WL*self.HSBOA - self.SK[1]])
-            
-            else:
-                C[6:10] = np.array([1.0,1.0,1.0,1.0])
-            
-            if self.DELTA_STERN[0] == 0.0:
-                Zv = -1.0
-            else: 
-                Zv = -self.DELTA_STERN[1]/ (2.0*self.DELTA_STERN[0])
-        
-            if Zv >=0.0 and Zv <= self.WL*self.HSBOA:
-                vert_delta_stern = (self.delta_stern(Zv) - self.SB_Prof[5])
-            else:
-                vert_delta_stern = -1.0
-            
-            C[10:13] = np.array([self.delta_stern(0.0) - self.SB_Prof[5],
-                                self.delta_stern(self.WL*self.HSBOA) - self.SB_Prof[5],
-                                vert_delta_stern])
-                
-                
-        #If no Stern Bulb, then no constraint violations
-        else:
-            C[6:13] = np.array([-1.0,-1.0,-1.0, -1.0, -1.0, -1.0, -1.0])
-        
-        
-        
-        
-        
-        
-        
-        return C
-    
-
-    '''
     =====================================================================
-                    Section 6: Mesh Generatation
+                    Section 5: Mesh Generatation
     ======================================================================
     
     This section contains functions needed to generate a complete mesh of the hull
@@ -1579,15 +1073,8 @@ class Hull_Parameterization:
         WL = []
         
         if z == 0.0:
-            if self.bit_BB:
-                bow_start = self.BB_Prof[5]
-            else:
-                bow_start = self.Kappa_BOW*self.Lb
-            
-            if self.bit_SB:
-                stern_end = self.SB_Prof[5]
-            else:
-                stern_end = self.Lm + self.Lb + self.Kappa_STERN*self.Ls 
+            bow_start = self.Kappa_BOW*self.Lb
+            stern_end = self.Lm + self.Lb + self.Kappa_STERN*self.Ls
         
             
             WL.append([bow_start,0.0,0.0])
@@ -1603,10 +1090,7 @@ class Hull_Parameterization:
             # Now generate the remaining watelines
          
             # Figure out spacing and profiles 
-            if self.bit_BB:
-                BOW = self.gen_waterline_bow_BB(z, X=X, bit_spaceOrGrid=0)
-            else:
-                BOW = self.gen_waterline_bow(z, X=X, bit_spaceOrGrid=0)
+            BOW = self.gen_waterline_bow(z, X=X, bit_spaceOrGrid=0)
             
             for i in range(0,len(BOW)):
                 WL.append([BOW[i,0], BOW[i,1], z])
@@ -1617,10 +1101,7 @@ class Hull_Parameterization:
             for i in range(0,len(X_mid)):
                 WL.append([X_mid[i], Y_mid, z])
             
-            if self.bit_SB:
-                STERN = self.gen_waterline_stern_SB(z, NUM_POINTS = 0, X=X, bit_spaceOrGrid=0)
-            else:
-                STERN = self.gen_waterline_stern(z, NUM_POINTS = 0, X=X, bit_spaceOrGrid=0)
+            STERN = self.gen_waterline_stern(z, NUM_POINTS = 0, X=X, bit_spaceOrGrid=0)
             
             for i in range(0,len(STERN)):
                 WL.append([STERN[i,0], STERN[i,1], z])
@@ -1631,7 +1112,7 @@ class Hull_Parameterization:
     def gen_pointCloud(self, NUM_WL = 50, PointsPerWL = 300, bit_GridOrList = 0, Z = []):
         # This function generates a point cloud [[xyz]0, ..., [xyz]N] of the hull
         
-        #NUM_WL = number of waterlines to generate. The total waterlines must be greater than 8 to include these heights: z = [0, 0.001*self.Dd, BKz, SKz, Dd, WL, Hbb, and Hsb]
+        #NUM_WL includes [0, 0.001*self.Dd, BKz, SKz, Dd, WL].
         #PointsPerWL will be divided so that each major section of the ship (stern, midbody, and bow) each gets a proportion of the points to their total length
         # bit_GridOrList determines of the PC will be returned as a grid (shape = (NUM_WL,PointsPerWL,3)) or a list (shape = (NUM_WL*PointsPerWL,3))
         # Z is an optional array of z heights to use for the point cloud or to generate the standard. Note that if Z is not empty, that the true number of waterlines will be equal to len(Z)
@@ -1666,12 +1147,14 @@ class Hull_Parameterization:
             
     def gen_WLHeights(self, NUM_WL):
     
-        #NUM_WL = number of waterlines to generate. The total waterlines must be greater than 8 to include these heights: z = [0, 0.001*self.Dd, BKz, SKz, Dd, WL, Hbb, and Hsb]
+        #NUM_WL includes [0, 0.001*self.Dd, BKz, SKz, Dd, WL].
         
+        if not isinstance(NUM_WL, (int, np.integer)) or NUM_WL < 6:
+            raise ValueError("NUM_WL must be an integer >= 6 to include the hull's required heights")
         z = np.zeros((NUM_WL,))
         
-        z[0:7] = np.array([self.BK[1], self.SK[1], self.WL, self.Hbb*self.WL, self.HSBOA*self.WL, self.Hsb*self.WL*self.HSBOA, 0.001*self.Dd])
-        z[7:] = np.linspace(0.0, self.Dd, NUM_WL - 7)
+        z[0:4] = np.array([self.BK[1], self.SK[1], self.WL, 0.001*self.Dd])
+        z[4:] = np.linspace(0.0, self.Dd, NUM_WL - 4)
         
         z = np.sort(z)
         
@@ -1685,15 +1168,8 @@ class Hull_Parameterization:
         WL = []
        
         if z == 0.0:
-            if self.bit_BB:
-                bow_start = self.BB_Prof[5]
-            else:
-                bow_start = self.Kappa_BOW*self.Lb
-            
-            if self.bit_SB:
-                stern_end = self.SB_Prof[5]
-            else:
-                stern_end = self.Lm + self.Lb + self.Kappa_STERN*self.Ls 
+            bow_start = self.Kappa_BOW*self.Lb
+            stern_end = self.Lm + self.Lb + self.Kappa_STERN*self.Ls
                 
             
                  
@@ -1703,16 +1179,8 @@ class Hull_Parameterization:
                 
         else:
             # Now generate the remaining watelines
-            if self.bit_BB and z <= self.WL:
-                bow_start = min([self.BB_profile(z), self.bow_profile(z)])
-            else:
-                bow_start = self.bow_profile(z)
-                
-            if self.bit_SB and z <= self.HSBOA*self.WL:
-                
-                stern_end = max([self.SB_profile(z),self.stern_profile(z)])
-            else:
-                stern_end = self.stern_profile(z)
+            bow_start = self.bow_profile(z)
+            stern_end = self.stern_profile(z)
                 
 
             WL_LOA = stern_end - bow_start
@@ -1732,10 +1200,7 @@ class Hull_Parameterization:
             #print(self.delta_bow(z) - bow_start)   
             #print([z, pts_bow,pts_mid,pts_stern])
                         
-            if self.bit_BB:
-                BOW = self.gen_waterline_bow_BB(z, NUM_POINTS = pts_bow)
-            else:
-                BOW = self.gen_waterline_bow(z, NUM_POINTS = pts_bow)
+            BOW = self.gen_waterline_bow(z, NUM_POINTS = pts_bow)
             
             for i in range(0,pts_bow):
                 WL.append([BOW[i,0], BOW[i,1], z])
@@ -1746,10 +1211,7 @@ class Hull_Parameterization:
             for i in range(0,pts_mid):
                 WL.append([X_mid[1+i], Y_mid, z])
             
-            if self.bit_SB:
-                STERN = self.gen_waterline_stern_SB(z, NUM_POINTS = pts_stern)
-            else:
-                STERN = self.gen_waterline_stern(z, NUM_POINTS = pts_stern)
+            STERN = self.gen_waterline_stern(z, NUM_POINTS = pts_stern)
             
             for i in range(0,pts_stern):
                 WL.append([STERN[i,0], STERN[i,1], z])
@@ -1965,16 +1427,8 @@ class Hull_Parameterization:
         
         for i in range(0,len(Z)):
             # Now generate the remaining watelines
-            if self.bit_BB and Z[i] <= self.WL:
-                x_bow[i] = self.BB_profile(Z[i])
-            else:
-                x_bow[i] = self.bow_profile(Z[i])
-                
-            if self.bit_SB and Z[i] <= self.HSBOA*self.WL:
-                
-                x_stern[i] = self.SB_profile(Z[i])
-            else:
-                x_stern[i] = self.stern_profile(Z[i])
+            x_bow[i] = self.bow_profile(Z[i])
+            x_stern[i] = self.stern_profile(Z[i])
                 
         
         WL = x_stern[-1] - x_bow[-1]
@@ -2009,13 +1463,13 @@ class Hull_Parameterization:
         
     def input_Constraints(self):
         
-        return np.concatenate((self.GenralHullformConstraints(),self.CrossSectionConstraints(), self.BowformConstraints(), self.SternformConstraints(), self.BulbformConstraints()))
+        return np.concatenate((self.GenralHullformConstraints(),self.CrossSectionConstraints(), self.BowformConstraints(), self.SternformConstraints()))
         
       
         
     '''
     =========================================================================
-                Section 7: Geometric and Volumetric Analysis Fucntions
+                Section 6: Geometric and Volumetric Analysis Fucntions
     ==========================================================================
     
     This section contains functions to perform Naval Architecture related analyis on the geometry of the hull
@@ -2028,9 +1482,8 @@ class Hull_Parameterization:
     4) Righting Moment(z)     -> Not Implemented Yet
     5) Block Coefficient      -> Not Implemented yet
     6) Draft, Heel and Trim   -> Not Implemented Yet
-    7) LOA_wBulb              -> Returns the maximum length of the hull including added lengths from bulbs
-    8) Max_Beam_midship       -> Returns the maximum beam of the midship section (calculated from midship section functions)
-    9) Max_Beam_PC            -> Returns the maximum beam of the hull (Estimated from point cloud for volume calculations)
+    7) Max_Beam_midship       -> Returns the maximum beam of the midship section (calculated from midship section functions)
+    8) Max_Beam_PC            -> Returns the maximum beam of the hull (Estimated from point cloud for volume calculations)
     
     '''
     
@@ -2194,23 +1647,6 @@ class Hull_Parameterization:
         
         self.WL_Lengths = WLL
 
-    def Calc_LOA_wBulb(self):
-        #This function returns the length of the hull including the bulb lengths
-        
-        if self.bit_BB:
-            bow_start = min([0.0,self.BB_Prof[5]-self.BB_Prof[4]])
-        else:
-            bow_start = 0.0
-        
-        if self.bit_SB:
-            stern_end = max([self.LOA, self.SB_Prof[5]+self.SB_Prof[4]])
-        else:
-            stern_end = self.LOA
-        
-        self.LOA_wBulb = stern_end - bow_start
-        
-        return self.LOA_wBulb
-    
     def Calc_Max_Beam_midship(self):
         #This function returns the maximum beam of the midship section (calculated from midship section functions)
 

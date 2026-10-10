@@ -1,0 +1,13 @@
+Gaussian_Curvature.py
+HullParameterization.py
+MaxBox.py
+ModifiedMichellCw.py
+STLGen.py
+pyproject.toml
+spatial_ops.py
+shipd.egg-info/PKG-INFO
+shipd.egg-info/SOURCES.txt
+shipd.egg-info/dependency_links.txt
+shipd.egg-info/entry_points.txt
+shipd.egg-info/requires.txt
+shipd.egg-info/top_level.txt

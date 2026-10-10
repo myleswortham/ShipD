@@ -1,0 +1,2 @@
+[spatial.root.mesh]
+hull = spatial_ops:hull

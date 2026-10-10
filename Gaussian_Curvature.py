@@ -39,9 +39,11 @@ def SurfArea(X,Z,Y):
     return A
             
 
-def GaussianCurvature(x):
+def GaussianCurvature(x, *, input_format=None, columns=None, source=None):
     #create a hull and a structured PC (use PC for michelle flow)
-    hull = HP(x)
+    hull = (HP(x) if input_format is None and columns is None and source is None else
+            HP.from_declared(x, input_format=HP.CURRENT_FORMAT if input_format is None else input_format,
+                             columns=columns, source=source))
     
     X,Z,Y,WL = hull.gen_PC_for_Cw(hull.Dd, NUM_WL=501, PointsPerWL = 501)
     
